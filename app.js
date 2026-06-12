@@ -92,8 +92,29 @@ window.addEventListener('error', function(e) {
 
 // 初始化页面
 document.addEventListener("DOMContentLoaded", async () => {
-
-  
+  // 🚀 强效缓存击穿：针对微信等顽固 WebView 直接注入 CSS 修正
+  const cacheBusterStyle = document.createElement("style");
+  cacheBusterStyle.innerHTML = `
+    @media (max-width: 1024px) {
+      .attraction-card {
+        height: auto !important;
+        min-height: 105px !important;
+        align-items: stretch !important;
+      }
+      .card-info {
+        padding: 8px 12px !important;
+        justify-content: center !important;
+        height: auto !important;
+      }
+      .card-excerpt {
+        white-space: normal !important;
+        display: -webkit-box !important;
+        -webkit-line-clamp: 2 !important;
+        -webkit-box-orient: vertical !important;
+      }
+    }
+  `;
+  document.head.appendChild(cacheBusterStyle);
 
   const searchInput = document.getElementById("global-search");
   if (searchInput) {
