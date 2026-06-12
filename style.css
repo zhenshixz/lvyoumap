@@ -1837,6 +1837,17 @@ body {
    10. 平板响应式兼容调整 (Android Tablet Mode)
    ========================================== */
 @media (max-width: 1024px) {
+  .meta-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .meta-item {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 12px 6px;
+    gap: 8px;
+  }
   .logo-text h1 {
     font-size: 14px;
   }
@@ -3592,12 +3603,15 @@ body {
   .attraction-card {
     height: auto;
     min-height: 85px;
+    align-items: stretch;
   }
   .card-name {
     font-size: 14px;
   }
   .card-info {
     padding: 6px 10px;
+    justify-content: center;
+    height: auto;
   }
 
   /* Detail Modal Restyling for Mobile */
@@ -3674,10 +3688,25 @@ body {
     padding: 4px 10px;
     font-size: 12px;
     white-space: nowrap;
-    flex-shrink: 0;
-  }
   .list-pagination {
-    padding: 4px 10px;
+    padding: 12px 10px 40px 10px;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    justify-content: flex-start !important;
+    -webkit-overflow-scrolling: touch;
+    gap: 6px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .list-pagination::-webkit-scrollbar {
+    display: none;
+  }
+  .page-btn {
+    min-width: 32px;
+    height: 32px;
+    padding: 0 4px;
+    font-size: 13px;
+    flex-shrink: 0;
   }
 }
 
@@ -3960,8 +3989,13 @@ body {
 }
 
 @media (max-width: 768px) {
-  .clothing-grid, .transport-grid {
+  .clothing-grid, .transport-grid, .hotel-grid, .food-grid {
     grid-template-columns: 1fr;
+  }
+
+  .lazy-ai-answer {
+    padding: 16px 14px;
+    font-size: 15px;
   }
 
   .guide-lite-card-grid,

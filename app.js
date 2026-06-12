@@ -1384,6 +1384,18 @@ function renderPagination(totalItems, itemsPerPage, currentPage, rawAttractions)
   }
 
   container.style.display = "flex";
+  if (window.innerWidth <= 768) {
+    container.style.justifyContent = "flex-start";
+    container.style.flexWrap = "nowrap";
+    container.style.overflowX = "auto";
+    container.style.width = "100%";
+    container.style.boxSizing = "border-box";
+  } else {
+    container.style.justifyContent = "center";
+    container.style.flexWrap = "nowrap";
+    container.style.overflowX = "visible";
+    container.style.width = "auto";
+  }
   container.innerHTML = "";
 
   // 1. 上一页
@@ -1473,6 +1485,19 @@ function renderPagination(totalItems, itemsPerPage, currentPage, rawAttractions)
     });
   }
   container.appendChild(nextBtn);
+
+  // 💡 Force style overriding for all child buttons (bypass CSS caching)
+  Array.from(container.children).forEach(child => {
+    if (child.tagName === 'BUTTON') {
+      child.style.flexShrink = "0";
+      if (window.innerWidth <= 768) {
+        child.style.minWidth = "32px";
+        child.style.height = "32px";
+        child.style.fontSize = "13px";
+        child.style.padding = "0 4px";
+      }
+    }
+  });
 }
 
 function getNumericPrice(priceText) {
@@ -2108,7 +2133,7 @@ async function openDetailModal(attraction) {
               <h3>交通出行</h3>
             </div>
 
-            <div class="transport-grid" style="grid-template-columns: 1fr 1fr 1fr;">
+            <div class="transport-grid">
               <div class="transport-card" onclick="this.classList.toggle('expanded')">
                 <div class="transport-icon-box" style="color: #3b82f6; background: #eff6ff;">✈️</div>
                 <div class="transport-card-text">
@@ -2836,6 +2861,18 @@ function renderFoodPagination(totalItems, itemsPerPage, currentPage, rawFoods, p
   }
 
   container.style.display = "flex";
+  if (window.innerWidth <= 768) {
+    container.style.justifyContent = "flex-start";
+    container.style.flexWrap = "nowrap";
+    container.style.overflowX = "auto";
+    container.style.width = "100%";
+    container.style.boxSizing = "border-box";
+  } else {
+    container.style.justifyContent = "center";
+    container.style.flexWrap = "nowrap";
+    container.style.overflowX = "visible";
+    container.style.width = "auto";
+  }
   container.innerHTML = "";
 
   // 1. 上一页
@@ -2880,6 +2917,19 @@ function renderFoodPagination(totalItems, itemsPerPage, currentPage, rawFoods, p
     });
   }
   container.appendChild(nextBtn);
+
+  // 💡 Force style overriding for all child buttons (bypass CSS caching)
+  Array.from(container.children).forEach(child => {
+    if (child.tagName === 'BUTTON') {
+      child.style.flexShrink = "0";
+      if (window.innerWidth <= 768) {
+        child.style.minWidth = "32px";
+        child.style.height = "32px";
+        child.style.fontSize = "13px";
+        child.style.padding = "0 4px";
+      }
+    }
+  });
 }
 
 // 🚀 10.2 渲染美食列表 (按城市级筛选并支持分页)
