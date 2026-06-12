@@ -98,8 +98,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     @media (max-width: 1024px) {
       .attraction-card {
         height: auto !important;
-        min-height: 105px !important;
+        min-height: 115px !important;
         align-items: stretch !important;
+      }
+      .card-img-wrapper {
+        height: auto !important;
+        min-height: 115px !important;
+        align-self: stretch !important;
+      }
+      .card-img {
+        height: 100% !important;
+        object-fit: cover !important;
       }
       .card-info {
         padding: 8px 12px !important;
@@ -111,6 +120,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         display: -webkit-box !important;
         -webkit-line-clamp: 2 !important;
         -webkit-box-orient: vertical !important;
+        overflow: hidden !important;
+        line-height: 1.4 !important;
       }
     }
   `;
