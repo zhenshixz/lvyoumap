@@ -2,8 +2,9 @@ const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
 
+const os = require('os');
 const dbFilePath = path.join(__dirname, 'db.json');
-const lockFilePath = path.join(__dirname, 'db.lock');
+const lockFilePath = path.join(os.tmpdir(), 'db.lock');
 const DB_CRYPTO_KEY = crypto.scryptSync('china-tourism-map-secret-salt-2026', 'salt', 32);
 const IV = Buffer.alloc(16, 0);
 
