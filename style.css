@@ -1837,6 +1837,16 @@ body {
    10. 平板响应式兼容调整 (Android Tablet Mode)
    ========================================== */
 @media (max-width: 1024px) {
+  .attraction-card {
+    height: auto;
+    min-height: 105px;
+    align-items: stretch;
+  }
+  .card-info {
+    padding: 8px 12px;
+    justify-content: center;
+    height: auto;
+  }
   .meta-grid {
     grid-template-columns: repeat(3, 1fr);
     gap: 8px;
