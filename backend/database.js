@@ -7,6 +7,8 @@ const dbFilePath = path.join(__dirname, 'db.json');
 const lockFilePath = path.join(os.tmpdir(), 'db.lock');
 const DB_CRYPTO_KEY = crypto.scryptSync('china-tourism-map-secret-salt-2026', 'salt', 32);
 const IV = Buffer.alloc(16, 0);
+let cachedData = null;
+let cachedMtimeMs = 0;
 
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -41,10 +43,26 @@ function releaseLock() {
 }
 
 async function readData() {
+  try {
+    const stat = await fs.stat(dbFilePath);
+    if (cachedData && cachedMtimeMs === stat.mtimeMs) {
+      return cachedData;
+    }
+  } catch (err) {
+    console.error('Error checking database file:', err);
+  }
+
   await acquireLock();
   try {
+    const stat = await fs.stat(dbFilePath);
+    if (cachedData && cachedMtimeMs === stat.mtimeMs) {
+      return cachedData;
+    }
+
     const data = await fs.readFile(dbFilePath, 'utf8');
-    return JSON.parse(data);
+    cachedData = JSON.parse(data);
+    cachedMtimeMs = stat.mtimeMs;
+    return cachedData;
   } catch (err) {
     console.error('Error reading database file:', err);
     return { provinces: {}, favorites: [], users: [] };
@@ -57,6 +75,9 @@ async function writeData(data) {
   await acquireLock();
   try {
     await fs.writeFile(dbFilePath, JSON.stringify(data, null, 2), 'utf8');
+    const stat = await fs.stat(dbFilePath);
+    cachedData = data;
+    cachedMtimeMs = stat.mtimeMs;
     
     // Synchronize frontend data files immediately
     const travelDataPath = path.join(__dirname, '..', 'travelData.json');

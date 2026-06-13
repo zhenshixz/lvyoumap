@@ -30,6 +30,7 @@ const hotCitiesData = [
 
 // 口碑美食与旅行计划数据库 (由后端数据接口懒加载填充)
 let localCuisineAndItineraries = {};
+const STATIC_DATA_VERSION = "20260613_static_data_v1";
 
 let myChart = null;
 let currentSelectedProvince = "";
@@ -45,6 +46,37 @@ let currentFoodPage = 1;
 // 生成/获取持久化用户ID
 const userId = localStorage.getItem('map_user_id') || ('user_' + Math.random().toString(36).substr(2, 9));
 localStorage.setItem('map_user_id', userId);
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status} ${url}`);
+  }
+  return response.json();
+}
+
+async function loadProvinceIndexData() {
+  try {
+    return await fetchJson(`/data/provinces-index.json?v=${STATIC_DATA_VERSION}`);
+  } catch (staticErr) {
+    console.warn("Static province index unavailable, falling back to API:", staticErr);
+    const resJson = await fetchJson("/api/provinces");
+    if (!resJson.success) throw new Error("API province index failed");
+    return resJson.data;
+  }
+}
+
+async function loadProvinceDetailData(provinceName) {
+  const encodedName = encodeURIComponent(provinceName);
+  try {
+    return await fetchJson(`/data/provinces/${encodedName}.json?v=${STATIC_DATA_VERSION}`);
+  } catch (staticErr) {
+    console.warn(`Static province detail unavailable for ${provinceName}, falling back to API:`, staticErr);
+    const resJson = await fetchJson(`/api/provinces/${encodedName}`);
+    if (!resJson.success) throw new Error(`API province detail failed: ${provinceName}`);
+    return resJson.data;
+  }
+}
 
 // 全局智能多级防裂图重定向捕获器 (Multi-Tier Smart Fallback Loader)
 window.addEventListener('error', function(e) {
@@ -152,11 +184,7 @@ async function loadInitialData() {
   }
   try {
     // 1. 获取所有省份轻量级索引数据
-    const response = await fetch(`/api/provinces?t=${Date.now()}`);
-    const resJson = await response.json();
-    if (resJson.success) {
-      window.tourismData = resJson.data;
-    }
+    window.tourismData = await loadProvinceIndexData();
 
     // 2. 获取当前用户的收藏夹列表
     const favResponse = await fetch(`/api/favorites?userId=${userId}&t=${Date.now()}`);
@@ -939,19 +967,15 @@ async function selectProvince(provinceName) {
   if (!destData.attractions) {
     showToast(`⏳ 正在获取【${provinceName}】最新旅游数据...`);
     try {
-      const response = await fetch(`/api/provinces/${encodeURIComponent(provinceName)}?t=${Date.now()}`);
-      const resJson = await response.json();
-      if (resJson.success) {
-        window.tourismData[provinceName] = resJson.data;
-        destData = resJson.data;
-        
-        // 兼容原有的美食和指南读取逻辑
-        localCuisineAndItineraries[provinceName] = {
-          bestTime: destData.bestTime || "最佳旅行时间：四季皆宜",
-          foods: destData.foods || [],
-          itineraries: destData.itineraries || []
-        };
-      }
+      destData = await loadProvinceDetailData(provinceName);
+      window.tourismData[provinceName] = destData;
+      
+      // 兼容原有的美食和指南读取逻辑
+      localCuisineAndItineraries[provinceName] = {
+        bestTime: destData.bestTime || "最佳旅行时间：四季皆宜",
+        foods: destData.foods || [],
+        itineraries: destData.itineraries || []
+      };
     } catch (err) {
       console.error("Error fetching province details:", err);
       showToast("⚠️ 获取省份数据失败，请检查网络");
@@ -991,7 +1015,7 @@ async function selectProvince(provinceName) {
   // 智能实时气象获取（接入 wttr.in 并通过后端进行高保真时辰与季节模拟）
   (async () => {
     try {
-      const weatherResponse = await fetch(`/api/weather?province=${encodeURIComponent(provinceName)}&t=${Date.now()}`);
+      const weatherResponse = await fetch(`/api/weather?province=${encodeURIComponent(provinceName)}`);
       const weatherJson = await weatherResponse.json();
       if (weatherJson.success) {
         const wData = weatherJson.data;
@@ -1367,7 +1391,7 @@ function renderAttractionList(attractions, containerId = "attractions-list-conta
     
     card.innerHTML = `
       <div class="card-img-wrapper">
-        <img class="card-img" src="${attr.image}" referrerpolicy="no-referrer" alt="${attr.name}">
+        <img class="card-img" src="${attr.image}" loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="${attr.name}">
         <div class="rank-badge ${rankClass}">${absoluteIndex + 1}</div>
       </div>
       <div class="card-info">
@@ -1553,7 +1577,7 @@ async function handleSearch(query) {
   }
 
   try {
-    const response = await fetch(`/api/search?q=${encodeURIComponent(query)}&t=${Date.now()}`);
+    const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
     const resJson = await response.json();
     if (resJson.success) {
       const results = resJson.data;
@@ -1783,12 +1807,9 @@ async function openDetailModal(attraction) {
     if (provName && window.tourismData[provName]) {
       if (!window.tourismData[provName].attractions) {
         try {
-          const response = await fetch(`/api/provinces/${encodeURIComponent(provName)}?t=${Date.now()}`);
-          const resJson = await response.json();
-          if (resJson.success) {
-            window.tourismData[provName] = resJson.data;
-            found = resJson.data.attractions.find(a => a.id === attraction.id || a.name === attraction.name);
-          }
+          const provinceDetail = await loadProvinceDetailData(provName);
+          window.tourismData[provName] = provinceDetail;
+          found = provinceDetail.attractions.find(a => a.id === attraction.id || a.name === attraction.name);
         } catch (e) {
           console.error("Failed to fetch province details in modal lookup:", e);
         }
@@ -3183,12 +3204,9 @@ async function prefetchProvinceImages(provinceName) {
   let attractions = destData.attractions;
   if (!attractions) {
     try {
-      const response = await fetch(`/api/provinces/${encodeURIComponent(provinceName)}?t=${Date.now()}`);
-      const resJson = await response.json();
-      if (resJson.success) {
-        window.tourismData[provinceName] = resJson.data;
-        attractions = resJson.data.attractions;
-      }
+      const provinceDetail = await loadProvinceDetailData(provinceName);
+      window.tourismData[provinceName] = provinceDetail;
+      attractions = provinceDetail.attractions;
     } catch (e) {
       return;
     }

@@ -12,17 +12,48 @@ const PORT = process.env.PORT || 3000;
 const lazyRouteProgressPath = path.join(__dirname, 'lazy_route_update_progress.json');
 const lazyRouteStopFlagPath = path.join(__dirname, 'lazy_route_update_stop.flag');
 const lazyRouteUpdaterPath = path.join(__dirname, 'update_lazy_routes_global.js');
+const enableOnDemandImageFetch = process.env.ENABLE_ON_DEMAND_IMAGE_FETCH === '1';
 
 // Enable CORS for development flexibility
 app.use(cors());
 // Parse JSON request bodies
 app.use(express.json());
 
-// API Endpoints Cache Disabling Middleware to guarantee instant database reload
-app.use('/api', (req, res, next) => {
+function setNoStore(res) {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
+}
+
+function setSharedCache(res, seconds, staleSeconds = 604800) {
+  res.setHeader('Cache-Control', `public, max-age=${seconds}, s-maxage=${seconds}, stale-while-revalidate=${staleSeconds}`);
+  res.removeHeader('Pragma');
+  res.removeHeader('Expires');
+}
+
+function setStaticCacheHeaders(res, filePath) {
+  const normalized = filePath.replace(/\\/g, '/');
+  if (normalized.includes('/data/') || normalized.endsWith('/china_geo.js') || normalized.endsWith('/china.json')) {
+    res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800');
+    return;
+  }
+
+  if (normalized.includes('/assets/')) {
+    res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=2592000, stale-while-revalidate=604800');
+  }
+}
+
+// Dynamic user APIs stay uncached; read-only travel APIs can be shared by CDN.
+app.use('/api', (req, res, next) => {
+  if (req.method === 'GET' && (req.path === '/provinces' || req.path.startsWith('/provinces/'))) {
+    setSharedCache(res, 3600);
+  } else if (req.method === 'GET' && req.path === '/search') {
+    setSharedCache(res, 300);
+  } else if (req.method === 'GET' && req.path === '/weather') {
+    setSharedCache(res, 900, 3600);
+  } else {
+    setNoStore(res);
+  }
   next();
 });
 
@@ -516,6 +547,10 @@ function downloadImage(url, destPath) {
 
 app.use('/assets/images', async (req, res, next) => {
   const filePath = path.join(__dirname, '../assets/images', req.path);
+
+  if (!enableOnDemandImageFetch) {
+    return next();
+  }
   
   try {
     // If file already exists and is not empty, serve it
@@ -601,7 +636,14 @@ app.use('/assets/images', async (req, res, next) => {
 });
 
 // Serve frontend assets statically
-app.use(express.static(path.join(__dirname, '../')));
+app.use(express.static(path.join(__dirname, '../'), {
+  setHeaders: setStaticCacheHeaders,
+}));
+
+app.get('/assets/images/*', (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800');
+  res.sendFile(path.join(__dirname, '../assets/images/default-thumbnail.jpg'));
+});
 
 // Serve index.html for any other paths (SPA fallback)
 app.get('*', (req, res) => {
