@@ -360,6 +360,17 @@ function initClock() {
 
 // 2. 初始化 ECharts 中国地图
 function initMap() {
+  if (!window.echarts) {
+    const loaderEl = document.getElementById("map-loader");
+    if (loaderEl) {
+      loaderEl.style.display = "flex";
+      const textEl = loaderEl.querySelector(".loader-text");
+      if (textEl) textEl.textContent = "地图引擎加载失败，请刷新重试";
+    }
+    console.error("ECharts failed to load.");
+    return;
+  }
+
   const chartDom = document.getElementById("map-chart");
   myChart = echarts.init(chartDom);
   
