@@ -384,40 +384,26 @@ async function initMap() {
   const chartDom = document.getElementById("map-chart");
   const loaderEl = document.getElementById("map-loader");
   if (loaderEl) {
-    loaderEl.classList.add("is-background");
     loaderEl.style.display = "flex";
     loaderEl.style.opacity = "1";
     const textEl = loaderEl.querySelector(".loader-text");
-    if (textEl) textEl.textContent = "正在加载交互地图...";
+    if (textEl) textEl.textContent = "正在加载中国地理数据...";
   }
-
-  const staticRevealTimer = setTimeout(() => {
-    if (!myChart && loaderEl) {
-      loaderEl.style.opacity = "0";
-      setTimeout(() => {
-        if (!myChart) loaderEl.style.display = "none";
-      }, 300);
-    }
-  }, 1200);
 
   try {
     await loadEcharts();
   } catch (err) {
-    clearTimeout(staticRevealTimer);
     if (loaderEl) {
-      loaderEl.classList.remove("is-background");
       loaderEl.style.display = "flex";
       loaderEl.style.opacity = "1";
       const textEl = loaderEl.querySelector(".loader-text");
-      if (textEl) textEl.textContent = "交互地图加载失败，已显示静态地图";
+      if (textEl) textEl.textContent = "地图加载失败，请刷新重试";
     }
     console.error("ECharts failed to load.", err);
     return;
   }
 
   myChart = echarts.init(chartDom);
-  chartDom.classList.add("echarts-ready");
-  clearTimeout(staticRevealTimer);
 
   // 隐藏加载动画
   if (loaderEl) {
