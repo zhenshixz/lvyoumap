@@ -30,7 +30,7 @@ const hotCitiesData = [
 
 // 口碑美食与旅行计划数据库 (由后端数据接口懒加载填充)
 let localCuisineAndItineraries = {};
-const STATIC_DATA_VERSION = "20260613_lean_data_v2";
+const STATIC_DATA_VERSION = "20260613_province_data_restore_v1";
 
 let myChart = null;
 let currentSelectedProvince = "";
@@ -125,47 +125,20 @@ async function loadProvinceDetailData(provinceName) {
 }
 
 async function loadProvinceListData(provinceName) {
-  const encodedName = encodeURIComponent(provinceName);
-  try {
-    return await fetchJson(`/data/province-lists/${encodedName}.json?v=${STATIC_DATA_VERSION}`);
-  } catch (listErr) {
-    console.warn(`Lean province list unavailable for ${provinceName}, falling back to full detail:`, listErr);
-    return loadProvinceDetailData(provinceName);
-  }
+  return loadProvinceDetailData(provinceName);
 }
 
 async function loadProvinceFoodData(provinceName) {
-  const encodedName = encodeURIComponent(provinceName);
-  try {
-    return await fetchJson(`/data/province-foods/${encodedName}.json?v=${STATIC_DATA_VERSION}`);
-  } catch (foodErr) {
-    console.warn(`Static province food data unavailable for ${provinceName}, falling back to full detail:`, foodErr);
-    const detail = await loadProvinceDetailData(provinceName);
-    return {
-      bestTime: detail.bestTime || "最佳旅行时间：四季皆宜",
-      foods: detail.foods || [],
-      itineraries: detail.itineraries || [],
-    };
-  }
+  const detail = await loadProvinceDetailData(provinceName);
+  return {
+    bestTime: detail.bestTime || "最佳旅行时间：四季皆宜",
+    foods: detail.foods || [],
+    itineraries: detail.itineraries || [],
+  };
 }
 
 async function loadAttractionDetailData(attraction) {
-  if (!attraction || !attraction.id) return null;
-  try {
-    return await fetchJson(`/data/attraction-details/${encodeURIComponent(attraction.id)}.json?v=${STATIC_DATA_VERSION}`);
-  } catch (detailErr) {
-    console.warn(`Static attraction detail unavailable for ${attraction.name || attraction.id}:`, detailErr);
-    const provinceName = attraction.provinceName || currentSelectedProvince;
-    if (!provinceName) return null;
-
-    try {
-      const provinceDetail = await loadProvinceDetailData(provinceName);
-      return (provinceDetail.attractions || []).find(a => a.id === attraction.id || a.name === attraction.name) || null;
-    } catch (fallbackErr) {
-      console.error("Failed to load fallback attraction detail:", fallbackErr);
-      return null;
-    }
-  }
+  return attraction || null;
 }
 
 // 全局智能多级防裂图重定向捕获器 (Multi-Tier Smart Fallback Loader)
@@ -1088,8 +1061,8 @@ async function selectProvince(provinceName) {
       // 兼容原有的美食和指南读取逻辑
       localCuisineAndItineraries[provinceName] = {
         bestTime: destData.bestTime || "最佳旅行时间：四季皆宜",
-        foods: null,
-        itineraries: null
+        foods: destData.foods || [],
+        itineraries: destData.itineraries || []
       };
     } catch (err) {
       console.error("Error fetching province details:", err);
@@ -1101,8 +1074,8 @@ async function selectProvince(provinceName) {
     if (!localCuisineAndItineraries[provinceName]) {
       localCuisineAndItineraries[provinceName] = {
         bestTime: destData.bestTime || "最佳旅行时间：四季皆宜",
-        foods: destData.foods || null,
-        itineraries: destData.itineraries || null
+        foods: destData.foods || [],
+        itineraries: destData.itineraries || []
       };
     }
   }
