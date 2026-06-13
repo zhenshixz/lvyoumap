@@ -30,7 +30,7 @@ const hotCitiesData = [
 
 // 口碑美食与旅行计划数据库 (由后端数据接口懒加载填充)
 let localCuisineAndItineraries = {};
-const STATIC_DATA_VERSION = "20260613_static_data_v1";
+const STATIC_DATA_VERSION = "20260613_lean_data_v2";
 
 let myChart = null;
 let currentSelectedProvince = "";
@@ -53,6 +53,52 @@ async function fetchJson(url, options = {}) {
     throw new Error(`Request failed: ${response.status} ${url}`);
   }
   return response.json();
+}
+
+let echartsLoadPromise = null;
+function loadEcharts() {
+  if (window.echarts) return Promise.resolve(window.echarts);
+  if (echartsLoadPromise) return echartsLoadPromise;
+
+  const loadScript = (src, timeoutMs = 3500) => new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      script.onload = null;
+      script.onerror = null;
+      reject(new Error(`ECharts load timeout: ${src}`));
+    }, timeoutMs);
+
+    script.src = src;
+    script.async = true;
+    script.onload = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      window.echarts ? resolve(window.echarts) : reject(new Error(`ECharts loaded without global export: ${src}`));
+    };
+    script.onerror = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new Error(`ECharts script failed to load: ${src}`));
+    };
+    document.head.appendChild(script);
+  });
+
+  const sources = [
+    "https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js",
+    "vendor/echarts.min.js?v=5.4.3",
+  ];
+
+  echartsLoadPromise = sources.reduce(
+    (promise, src) => promise.catch(() => loadScript(src)),
+    Promise.reject(),
+  );
+
+  return echartsLoadPromise;
 }
 
 async function loadProvinceIndexData() {
@@ -78,6 +124,50 @@ async function loadProvinceDetailData(provinceName) {
   }
 }
 
+async function loadProvinceListData(provinceName) {
+  const encodedName = encodeURIComponent(provinceName);
+  try {
+    return await fetchJson(`/data/province-lists/${encodedName}.json?v=${STATIC_DATA_VERSION}`);
+  } catch (listErr) {
+    console.warn(`Lean province list unavailable for ${provinceName}, falling back to full detail:`, listErr);
+    return loadProvinceDetailData(provinceName);
+  }
+}
+
+async function loadProvinceFoodData(provinceName) {
+  const encodedName = encodeURIComponent(provinceName);
+  try {
+    return await fetchJson(`/data/province-foods/${encodedName}.json?v=${STATIC_DATA_VERSION}`);
+  } catch (foodErr) {
+    console.warn(`Static province food data unavailable for ${provinceName}, falling back to full detail:`, foodErr);
+    const detail = await loadProvinceDetailData(provinceName);
+    return {
+      bestTime: detail.bestTime || "最佳旅行时间：四季皆宜",
+      foods: detail.foods || [],
+      itineraries: detail.itineraries || [],
+    };
+  }
+}
+
+async function loadAttractionDetailData(attraction) {
+  if (!attraction || !attraction.id) return null;
+  try {
+    return await fetchJson(`/data/attraction-details/${encodeURIComponent(attraction.id)}.json?v=${STATIC_DATA_VERSION}`);
+  } catch (detailErr) {
+    console.warn(`Static attraction detail unavailable for ${attraction.name || attraction.id}:`, detailErr);
+    const provinceName = attraction.provinceName || currentSelectedProvince;
+    if (!provinceName) return null;
+
+    try {
+      const provinceDetail = await loadProvinceDetailData(provinceName);
+      return (provinceDetail.attractions || []).find(a => a.id === attraction.id || a.name === attraction.name) || null;
+    } catch (fallbackErr) {
+      console.error("Failed to load fallback attraction detail:", fallbackErr);
+      return null;
+    }
+  }
+}
+
 // 全局智能多级防裂图重定向捕获器 (Multi-Tier Smart Fallback Loader)
 window.addEventListener('error', function(e) {
   if (e.target.tagName === 'IMG') {
@@ -89,30 +179,10 @@ window.addEventListener('error', function(e) {
       return;
     }
     
-    // 第一级智能级联降级：如果是本地缺失的相对路径资源，动态解析拼音关键字重定向至高质量 LoremFlickr 云服务
+    // 第一级智能级联降级：如果本地图片缺失，直接使用本地占位图，避免线上访问被外部图片服务拖慢。
     if (currentSrc.includes('/assets/images/')) {
-      let keyword = 'china-travel';
-      
-      // 1. 匹配景点路径 format: /assets/images/attractions/province_attraction.jpg
-      const attrMatch = currentSrc.match(/\/attractions\/[^_]+_([^.]+)\.jpg/i);
-      // 2. 匹配美食路径 format: /assets/images/foods/province_food.jpg
-      const foodMatch = currentSrc.match(/\/foods\/[^_]+_([^.]+)\.jpg/i);
-      // 3. 匹配省份主图 format: /assets/images/provinces/province.jpg
-      const provMatch = currentSrc.match(/\/provinces\/([^.]+)\.jpg/i);
-      
-      if (attrMatch) {
-        keyword = attrMatch[1];
-      } else if (foodMatch) {
-        keyword = foodMatch[1];
-      } else if (provMatch) {
-        keyword = provMatch[1];
-      }
-      
-      // 兼容可能包含的拼音分隔符，转换为空格或直接以其检索
-      keyword = encodeURIComponent(keyword.replace(/-/g, ' '));
-      
-      console.log(`[Smart Fallback] Local resource missing: ${currentSrc}. Dynamically redirecting to LoremFlickr for unique picture: ${keyword}`);
-      img.src = `https://loremflickr.com/600/400/${keyword},china`;
+      console.warn(`[Image Fallback] Local resource missing: ${currentSrc}. Displaying default-thumbnail.`);
+      img.src = '/assets/images/default-thumbnail.jpg';
       return;
     }
     
@@ -209,9 +279,9 @@ async function loadInitialData() {
   }
 
   // 3. 初始化并渲染地图
-  initMap();
   updateFavoritesCount();
   populateProvinceDropdown();
+  initMap();
 }
 
 function initLazyRouteUpdateMonitor() {
@@ -335,12 +405,48 @@ function initClock() {
 }
 
 // 2. 初始化 ECharts 中国地图
-function initMap() {
+async function initMap() {
+  if (myChart) return;
+
   const chartDom = document.getElementById("map-chart");
-  myChart = echarts.init(chartDom);
-  
-  // 隐藏加载动画
   const loaderEl = document.getElementById("map-loader");
+  if (loaderEl) {
+    loaderEl.classList.add("is-background");
+    loaderEl.style.display = "flex";
+    loaderEl.style.opacity = "1";
+    const textEl = loaderEl.querySelector(".loader-text");
+    if (textEl) textEl.textContent = "正在加载交互地图...";
+  }
+
+  const staticRevealTimer = setTimeout(() => {
+    if (!myChart && loaderEl) {
+      loaderEl.style.opacity = "0";
+      setTimeout(() => {
+        if (!myChart) loaderEl.style.display = "none";
+      }, 300);
+    }
+  }, 1200);
+
+  try {
+    await loadEcharts();
+  } catch (err) {
+    clearTimeout(staticRevealTimer);
+    if (loaderEl) {
+      loaderEl.classList.remove("is-background");
+      loaderEl.style.display = "flex";
+      loaderEl.style.opacity = "1";
+      const textEl = loaderEl.querySelector(".loader-text");
+      if (textEl) textEl.textContent = "交互地图加载失败，已显示静态地图";
+    }
+    console.error("ECharts failed to load.", err);
+    return;
+  }
+
+  myChart = echarts.init(chartDom);
+  chartDom.classList.add("echarts-ready");
+  clearTimeout(staticRevealTimer);
+
+  // 隐藏加载动画
   if (loaderEl) {
     loaderEl.style.opacity = "0";
     setTimeout(() => loaderEl.style.display = "none", 500);
@@ -350,6 +456,7 @@ function initMap() {
   echarts.registerMap('china', chinaGeoJSON);
 
   renderMapWithOptions();
+  bindMapChartEvents();
 
   window.addEventListener('resize', () => {
     myChart.resize();
@@ -694,9 +801,11 @@ function updateCustomPinPosition() {
   }
 }
 
-// 3. 事件监听配置
-function initEventListeners() {
-  // 3.1 地图区块及标记点击事件与图片预加载 (全面兼容 2D / ECharts GL 3D)
+let mapChartEventsBound = false;
+function bindMapChartEvents() {
+  if (!myChart || mapChartEventsBound) return;
+  mapChartEventsBound = true;
+
   myChart.on('click', (params) => {
     let targetProvince = "";
     
@@ -725,6 +834,12 @@ function initEventListeners() {
   // 监听地图的缩放、拖拽事件，实时渲染同步自定义定位 Pin 位置
   myChart.on('georoam', updateCustomPinPosition);
   window.addEventListener('resize', updateCustomPinPosition);
+}
+
+// 3. 事件监听配置
+function initEventListeners() {
+  // 3.1 地图区块及标记点击事件与图片预加载 (全面兼容 2D / ECharts GL 3D)
+  bindMapChartEvents();
 
   // 3.2 重置控制 (复位为全国，清除高亮和详情)
   document.getElementById("btn-reset").addEventListener("click", () => {
@@ -967,14 +1082,14 @@ async function selectProvince(provinceName) {
   if (!destData.attractions) {
     showToast(`⏳ 正在获取【${provinceName}】最新旅游数据...`);
     try {
-      destData = await loadProvinceDetailData(provinceName);
+      destData = await loadProvinceListData(provinceName);
       window.tourismData[provinceName] = destData;
       
       // 兼容原有的美食和指南读取逻辑
       localCuisineAndItineraries[provinceName] = {
         bestTime: destData.bestTime || "最佳旅行时间：四季皆宜",
-        foods: destData.foods || [],
-        itineraries: destData.itineraries || []
+        foods: null,
+        itineraries: null
       };
     } catch (err) {
       console.error("Error fetching province details:", err);
@@ -986,8 +1101,8 @@ async function selectProvince(provinceName) {
     if (!localCuisineAndItineraries[provinceName]) {
       localCuisineAndItineraries[provinceName] = {
         bestTime: destData.bestTime || "最佳旅行时间：四季皆宜",
-        foods: destData.foods || [],
-        itineraries: destData.itineraries || []
+        foods: destData.foods || null,
+        itineraries: destData.itineraries || null
       };
     }
   }
@@ -995,10 +1110,12 @@ async function selectProvince(provinceName) {
   currentSelectedProvince = provinceName;
 
   // 在 ECharts 中选中当前区块
-  myChart.dispatchAction({
-    type: 'select',
-    name: provinceName
-  });
+  if (myChart) {
+    myChart.dispatchAction({
+      type: 'select',
+      name: provinceName
+    });
+  }
 
   // 更新目的地介绍面板
   document.getElementById("panel-empty").style.display = "none";
@@ -1613,7 +1730,7 @@ async function handleSearch(query) {
       document.getElementById("panel-empty").style.display = "none";
       document.getElementById("panel-destination").style.display = "flex";
       
-      document.getElementById("dest-img").src = "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=800&q=80";
+      document.getElementById("dest-img").src = "/assets/images/china_relief_map.png";
       document.getElementById("dest-title").textContent = `搜索: "${query}"`;
       document.getElementById("dest-desc").textContent = `系统为您在全国范围内检索到 ${foundAttractions.length} 个相关景点。`;
       document.getElementById("dest-weather-temp").textContent = "--";
@@ -1779,9 +1896,14 @@ async function openDetailModal(attraction) {
   // =========================================================
   // 🚀 高智能商用级【数据沙箱与真拟合拦截器】 (Data Sanitizer & Synthesizer)
   // =========================================================
+  const detailedAttraction = await loadAttractionDetailData(attraction);
+  if (detailedAttraction) {
+    attraction = { ...attraction, ...detailedAttraction };
+  }
+
   // 如果是收藏夹等轻量对象，尝试从 window.tourismData 补全 guide_data，如果不存在则懒加载对应省份数据
-  let found = null;
-  if (window.tourismData) {
+  let found = (attraction.guide_data || attraction.openHours || attraction.route || attraction.lazy_routes) ? attraction : null;
+  if (!found && window.tourismData) {
     for (const pName in window.tourismData) {
       const pData = window.tourismData[pName];
       if (pData && pData.attractions) {
@@ -1807,7 +1929,7 @@ async function openDetailModal(attraction) {
     if (provName && window.tourismData[provName]) {
       if (!window.tourismData[provName].attractions) {
         try {
-          const provinceDetail = await loadProvinceDetailData(provName);
+          const provinceDetail = await loadProvinceListData(provName);
           window.tourismData[provName] = provinceDetail;
           found = provinceDetail.attractions.find(a => a.id === attraction.id || a.name === attraction.name);
         } catch (e) {
@@ -1995,7 +2117,7 @@ async function openDetailModal(attraction) {
       parts.forEach((p, idx) => {
         if (idx < 3) {
            let tag = idx === 0 ? "首选" : (idx === 1 ? "特色" : "经济");
-           let img = `assets/images/dynamic_hotel_${encodeURIComponent(p.substring(0,15))}.jpg?v=${new Date().getTime()}`;
+           let img = `assets/images/dynamic_hotel_${encodeURIComponent(p.substring(0,15))}.jpg?v=${STATIC_DATA_VERSION}`;
            hotelAreas.push({ name: p.length > 18 ? p.substring(0, 18) + '...' : p, tag, desc: descPool[idx], img });
         }
       });
@@ -2022,7 +2144,7 @@ async function openDetailModal(attraction) {
       
       parts.forEach((p, idx) => {
         if (idx < 3) {
-           let img = `assets/images/dynamic_food_${encodeURIComponent(p.substring(0,15))}.jpg?v=${new Date().getTime()}`;
+           let img = `assets/images/dynamic_food_${encodeURIComponent(p.substring(0,15))}.jpg?v=${STATIC_DATA_VERSION}`;
            foodsList.push({ name: p.length > 15 ? p.substring(0, 15) + '...' : p, desc: descPool[idx], img });
         }
       });
@@ -2105,13 +2227,13 @@ async function openDetailModal(attraction) {
 
       const realHotelAreas = housingGuide.map((h, idx) => {
         let tag = idx === 0 ? "首选" : (idx === 1 ? "特色" : "经济");
-        let img = `assets/images/dynamic_hotel_${encodeURIComponent((h.area || "").substring(0,15))}.jpg?v=${new Date().getTime()}`;
+        let img = `assets/images/dynamic_hotel_${encodeURIComponent((h.area || "").substring(0,15))}.jpg?v=${STATIC_DATA_VERSION}`;
         return { name: h.area || `推荐区域${idx + 1}`, tag, desc: h.desc || "交通便利", img };
       });
 
       const realFoodsList = foodGuide.slice(0, 3).map((f, idx) => {
         let desc = idx === 0 ? "地道招牌，风味绝佳" : (idx === 1 ? "本地传统特色，必尝" : "特色小吃，打卡首选");
-        let img = `assets/images/dynamic_food_${encodeURIComponent(f.substring(0,15))}.jpg?v=${new Date().getTime()}`;
+        let img = `assets/images/dynamic_food_${encodeURIComponent(f.substring(0,15))}.jpg?v=${STATIC_DATA_VERSION}`;
         return { name: f, desc, img };
       });
 
@@ -2986,13 +3108,43 @@ function renderFoodPagination(totalItems, itemsPerPage, currentPage, rawFoods, p
 }
 
 // 🚀 10.2 渲染美食列表 (按城市级筛选并支持分页)
-function renderFoodList(provinceName) {
+async function ensureProvinceFoodData(provinceName) {
+  if (!localCuisineAndItineraries[provinceName]) {
+    localCuisineAndItineraries[provinceName] = { bestTime: "最佳旅行时间：四季皆宜", foods: null, itineraries: null };
+  }
+
+  const extraInfo = localCuisineAndItineraries[provinceName];
+  if (Array.isArray(extraInfo.foods)) return extraInfo;
+
+  const loaded = await loadProvinceFoodData(provinceName);
+  localCuisineAndItineraries[provinceName] = {
+    ...extraInfo,
+    bestTime: loaded.bestTime || extraInfo.bestTime || "最佳旅行时间：四季皆宜",
+    foods: loaded.foods || [],
+    itineraries: loaded.itineraries || [],
+  };
+
+  return localCuisineAndItineraries[provinceName];
+}
+
+async function renderFoodList(provinceName) {
   const container = document.getElementById("foods-list-container");
   container.innerHTML = "";
   
   const FOOD_ITEMS_PER_PAGE = 10;
   
-  const extraInfo = localCuisineAndItineraries[provinceName];
+  let extraInfo = localCuisineAndItineraries[provinceName];
+  if (!extraInfo || !Array.isArray(extraInfo.foods)) {
+    container.innerHTML = `<div class="empty-state" style="padding:20px; border:none; margin:0;">正在加载美食推荐...</div>`;
+    try {
+      extraInfo = await ensureProvinceFoodData(provinceName);
+    } catch (err) {
+      console.error("Failed to load food data:", err);
+      container.innerHTML = `<div class="empty-state" style="padding:20px; border:none; margin:0;">美食推荐加载失败，请稍后重试</div>`;
+      return;
+    }
+  }
+
   if (!extraInfo || !extraInfo.foods || extraInfo.foods.length === 0) {
     container.innerHTML = `<div class="empty-state" style="padding:20px; border:none; margin:0;">暂无美食推荐数据</div>`;
     const filterContainer = document.getElementById("food-city-filter-container");
@@ -3047,7 +3199,7 @@ function renderFoodList(provinceName) {
     let tagsHTML = food.tags ? food.tags.map(t => `<span class="card-badge-level">${t}</span>`).join('') : '';
 
     card.innerHTML = `
-      <img class="food-img" src="${food.image}" referrerpolicy="no-referrer" alt="${food.name}">
+      <img class="food-img" src="${food.image}" loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="${food.name}">
       <div class="food-info">
         <div class="food-title-row">
           <h4 class="food-name">${food.name}</h4>
@@ -3204,7 +3356,7 @@ async function prefetchProvinceImages(provinceName) {
   let attractions = destData.attractions;
   if (!attractions) {
     try {
-      const provinceDetail = await loadProvinceDetailData(provinceName);
+      const provinceDetail = await loadProvinceListData(provinceName);
       window.tourismData[provinceName] = provinceDetail;
       attractions = provinceDetail.attractions;
     } catch (e) {
