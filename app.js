@@ -55,6 +55,52 @@ async function fetchJson(url, options = {}) {
   return response.json();
 }
 
+let echartsLoadPromise = null;
+function loadEcharts() {
+  if (window.echarts) return Promise.resolve(window.echarts);
+  if (echartsLoadPromise) return echartsLoadPromise;
+
+  const loadScript = (src, timeoutMs = 3500) => new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      script.onload = null;
+      script.onerror = null;
+      reject(new Error(`ECharts load timeout: ${src}`));
+    }, timeoutMs);
+
+    script.src = src;
+    script.async = true;
+    script.onload = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      window.echarts ? resolve(window.echarts) : reject(new Error(`ECharts loaded without global export: ${src}`));
+    };
+    script.onerror = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new Error(`ECharts script failed to load: ${src}`));
+    };
+    document.head.appendChild(script);
+  });
+
+  const sources = [
+    "https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js",
+    "vendor/echarts.min.js?v=5.4.3",
+  ];
+
+  echartsLoadPromise = sources.reduce(
+    (promise, src) => promise.catch(() => loadScript(src)),
+    Promise.reject(),
+  );
+
+  return echartsLoadPromise;
+}
+
 async function loadProvinceIndexData() {
   try {
     return await fetchJson(`/data/provinces-index.json?v=${STATIC_DATA_VERSION}`);
@@ -233,9 +279,9 @@ async function loadInitialData() {
   }
 
   // 3. 初始化并渲染地图
-  initMap();
   updateFavoritesCount();
   populateProvinceDropdown();
+  initMap();
 }
 
 function initLazyRouteUpdateMonitor() {
@@ -359,23 +405,48 @@ function initClock() {
 }
 
 // 2. 初始化 ECharts 中国地图
-function initMap() {
-  if (!window.echarts) {
-    const loaderEl = document.getElementById("map-loader");
-    if (loaderEl) {
-      loaderEl.style.display = "flex";
-      const textEl = loaderEl.querySelector(".loader-text");
-      if (textEl) textEl.textContent = "地图引擎加载失败，请刷新重试";
+async function initMap() {
+  if (myChart) return;
+
+  const chartDom = document.getElementById("map-chart");
+  const loaderEl = document.getElementById("map-loader");
+  if (loaderEl) {
+    loaderEl.classList.add("is-background");
+    loaderEl.style.display = "flex";
+    loaderEl.style.opacity = "1";
+    const textEl = loaderEl.querySelector(".loader-text");
+    if (textEl) textEl.textContent = "正在加载交互地图...";
+  }
+
+  const staticRevealTimer = setTimeout(() => {
+    if (!myChart && loaderEl) {
+      loaderEl.style.opacity = "0";
+      setTimeout(() => {
+        if (!myChart) loaderEl.style.display = "none";
+      }, 300);
     }
-    console.error("ECharts failed to load.");
+  }, 1200);
+
+  try {
+    await loadEcharts();
+  } catch (err) {
+    clearTimeout(staticRevealTimer);
+    if (loaderEl) {
+      loaderEl.classList.remove("is-background");
+      loaderEl.style.display = "flex";
+      loaderEl.style.opacity = "1";
+      const textEl = loaderEl.querySelector(".loader-text");
+      if (textEl) textEl.textContent = "交互地图加载失败，已显示静态地图";
+    }
+    console.error("ECharts failed to load.", err);
     return;
   }
 
-  const chartDom = document.getElementById("map-chart");
   myChart = echarts.init(chartDom);
-  
+  chartDom.classList.add("echarts-ready");
+  clearTimeout(staticRevealTimer);
+
   // 隐藏加载动画
-  const loaderEl = document.getElementById("map-loader");
   if (loaderEl) {
     loaderEl.style.opacity = "0";
     setTimeout(() => loaderEl.style.display = "none", 500);
@@ -385,6 +456,7 @@ function initMap() {
   echarts.registerMap('china', chinaGeoJSON);
 
   renderMapWithOptions();
+  bindMapChartEvents();
 
   window.addEventListener('resize', () => {
     myChart.resize();
@@ -729,9 +801,11 @@ function updateCustomPinPosition() {
   }
 }
 
-// 3. 事件监听配置
-function initEventListeners() {
-  // 3.1 地图区块及标记点击事件与图片预加载 (全面兼容 2D / ECharts GL 3D)
+let mapChartEventsBound = false;
+function bindMapChartEvents() {
+  if (!myChart || mapChartEventsBound) return;
+  mapChartEventsBound = true;
+
   myChart.on('click', (params) => {
     let targetProvince = "";
     
@@ -760,6 +834,12 @@ function initEventListeners() {
   // 监听地图的缩放、拖拽事件，实时渲染同步自定义定位 Pin 位置
   myChart.on('georoam', updateCustomPinPosition);
   window.addEventListener('resize', updateCustomPinPosition);
+}
+
+// 3. 事件监听配置
+function initEventListeners() {
+  // 3.1 地图区块及标记点击事件与图片预加载 (全面兼容 2D / ECharts GL 3D)
+  bindMapChartEvents();
 
   // 3.2 重置控制 (复位为全国，清除高亮和详情)
   document.getElementById("btn-reset").addEventListener("click", () => {
@@ -1030,10 +1110,12 @@ async function selectProvince(provinceName) {
   currentSelectedProvince = provinceName;
 
   // 在 ECharts 中选中当前区块
-  myChart.dispatchAction({
-    type: 'select',
-    name: provinceName
-  });
+  if (myChart) {
+    myChart.dispatchAction({
+      type: 'select',
+      name: provinceName
+    });
+  }
 
   // 更新目的地介绍面板
   document.getElementById("panel-empty").style.display = "none";
