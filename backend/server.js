@@ -38,7 +38,7 @@ function setStaticCacheHeaders(res, filePath) {
     return;
   }
 
-  if (normalized.includes('/assets/')) {
+  if (normalized.includes('/assets/') || normalized.includes('/vendor/')) {
     res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=2592000, stale-while-revalidate=604800');
   }
 }
